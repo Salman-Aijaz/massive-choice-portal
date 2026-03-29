@@ -2,23 +2,14 @@
 
 import pool from '../app/lib/db';
 import { revalidatePath } from 'next/cache';
-import { writeFile, mkdir } from 'fs/promises';
-import path from 'path';
 
 export async function createProduct(formData: FormData) {
   try {
-    // Ensure uploads directory exists
-    const uploadDir = path.join(process.cwd(), 'public/uploads');
-    await mkdir(uploadDir, { recursive: true });
-
-    // Extract fields
     const title = formData.get('title') as string;
     const originalPrice = formData.get('originalPrice') as string;
     const discountPrice = formData.get('discountPrice') as string;
     const description = formData.get('description') as string;
     const specifications = formData.get('specifications') as string;
-    
-    // Get all image files
     const images = formData.getAll('images') as File[];
 
     // Validation
@@ -32,47 +23,36 @@ export async function createProduct(formData: FormData) {
       return { error: 'Maximum 7 images allowed' };
     }
 
-    // Save images and collect URLs
-    const imageUrls: string[] = [];
+    // Images → base64
+    const base64Images: string[] = [];
     for (const file of images) {
       if (file.size === 0) continue;
-      
+      if (file.size > 5 * 1024 * 1024) {
+        return { error: `${file.name} 5MB se bada hai` };
+      }
       const bytes = await file.arrayBuffer();
-      const buffer = Buffer.from(bytes);
-      
-      const ext = file.name.split('.').pop();
-      const fileName = `${Date.now()}-${Math.random().toString(36).substring(7)}.${ext}`;
-      const filePath = path.join(uploadDir, fileName);
-      
-      await writeFile(filePath, buffer);
-      imageUrls.push(`/uploads/${fileName}`);
+      const base64 = Buffer.from(bytes).toString('base64');
+      base64Images.push(`data:${file.type};base64,${base64}`);
     }
 
-    // Insert into database
+    // DB insert
     const client = await pool.connect();
-    
-    const query = `
-      INSERT INTO products (title, original_price, discount_price, description, images, specifications)
-      VALUES ($1, $2, $3, $4, $5, $6)
-      RETURNING id
-    `;
-    
-    const values = [
-      title,
-      parseFloat(originalPrice),
-      discountPrice ? parseFloat(discountPrice) : null,
-      description,
-      JSON.stringify(imageUrls),
-      specifications ? JSON.parse(specifications) : null
-    ];
-
-    await client.query(query, values);
+    await client.query(
+      `INSERT INTO products (title, original_price, discount_price, description, images, specifications)
+       VALUES ($1, $2, $3, $4, $5, $6)`,
+      [
+        title,
+        parseFloat(originalPrice),
+        discountPrice ? parseFloat(discountPrice) : null,
+        description,
+        JSON.stringify(base64Images),
+        specifications ? JSON.parse(specifications) : null,
+      ]
+    );
     client.release();
 
-    // Revalidate cache so new product shows up immediately
     revalidatePath('/');
-    
-    return { success: true, message: 'Product added successfully!' };
+    return { success: true };
   } catch (error: any) {
     console.error('Server Action Error:', error);
     return { error: error.message || 'Failed to create product' };
@@ -84,7 +64,6 @@ export async function deleteProduct(id: number) {
     const client = await pool.connect();
     await client.query('DELETE FROM products WHERE id = $1', [id]);
     client.release();
-    
     revalidatePath('/');
     return { success: true };
   } catch (error) {
