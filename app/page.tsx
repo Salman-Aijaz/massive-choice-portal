@@ -1,20 +1,29 @@
-// app/page.tsx - Sirf relevant parts update kiye hain
 "use client";
 import { useState, useEffect, useRef, useTransition } from "react";
 import { createProduct, deleteProduct, updateProduct } from "../app/action";
+import { ProductCategory, CATEGORY_OPTIONS } from "../app/lib/types";  // ✅ Path fix
 
-// ✅ Category options
-const CATEGORY_OPTIONS = [
-  { value: 'MEN', label: '👨 Men' },
-  { value: 'WOMEN', label: '👩 Women' },
-  { value: 'KIDS', label: '🧒 Kids' },
-  { value: 'COUPLE', label: '💑 Couple' },
-  { value: 'SMART_WATCHES', label: '⌚ Smart Watches' },
-  { value: 'CLASSIC', label: '🕰️ Classic' },
-  { value: 'SPORT', label: '🏃 Sport' },
-  { value: 'LUXURY', label: '💎 Luxury' },
-];
+// ✅ Helper: Category label with emoji
+const getCategoryLabel = (cat: string) => {
+  const map: Record<string, string> = {
+    MEN: '👨 Men', WOMEN: '👩 Women', KIDS: '🧒 Kids', COUPLE: '💑 Couple',
+    SMART_WATCHES: '⌚ Smart', CLASSIC: '🕰️ Classic', SPORT: '🏃 Sport', LUXURY: '💎 Luxury',
+  };
+  return map[cat] || cat;
+};
 
+// ✅ Helper: Category badge colors
+const getCategoryColor = (cat: string) => {
+  const colors: Record<string, string> = {
+    MEN: 'bg-blue-100 text-blue-800', WOMEN: 'bg-pink-100 text-pink-800',
+    KIDS: 'bg-yellow-100 text-yellow-800', COUPLE: 'bg-purple-100 text-purple-800',
+    SMART_WATCHES: 'bg-green-100 text-green-800', CLASSIC: 'bg-gray-100 text-gray-800',
+    SPORT: 'bg-orange-100 text-orange-800', LUXURY: 'bg-amber-100 text-amber-800',
+  };
+  return colors[cat] || 'bg-gray-100 text-gray-800';
+};
+
+// ✅ Helper: Parse images from DB (string or array)
 const getImagesArray = (images: any): string[] => {
   if (!images) return [];
   if (Array.isArray(images)) return images;
@@ -22,9 +31,7 @@ const getImagesArray = (images: any): string[] => {
     try {
       const parsed = JSON.parse(images);
       return Array.isArray(parsed) ? parsed : [images];
-    } catch {
-      return [images];
-    }
+    } catch { return [images]; }
   }
   return [];
 };
@@ -38,24 +45,45 @@ export default function Home() {
   const [editingId, setEditingId] = useState<number | null>(null);
   const [isEditing, setIsEditing] = useState(false);
 
+  // ✅ formData with categories array (using enum)
   const [formData, setFormData] = useState({
     title: "",
     originalPrice: "",
     discountPrice: "",
     description: "",
-    specifications: "",
     quantity: "",
-    category: "MEN", // ✅ Default category
+    categories: [ProductCategory.MEN] as ProductCategory[],
   });
 
+  // ✅ Safe fetch with array validation
   const fetchProducts = async () => {
-    const res = await fetch("/api/products");
-    const data = await res.json();
-    setProducts(data);
+    try {
+      const res = await fetch("/api/products");
+      if (!res.ok) throw new Error("Failed to fetch");
+      const data = await res.json();
+      setProducts(Array.isArray(data) ? data : []);
+    } catch (error) {
+      console.error("Fetch error:", error);
+      setProducts([]);
+    }
   };
 
   useEffect(() => { fetchProducts(); }, []);
 
+  // ✅ Toggle category selection
+  const toggleCategory = (category: ProductCategory) => {
+    setFormData(prev => {
+      const exists = prev.categories.includes(category);
+      return {
+        ...prev,
+        categories: exists 
+          ? prev.categories.filter(c => c !== category)
+          : [...prev.categories, category]
+      };
+    });
+  };
+
+  // ✅ File upload handler
   const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
     const files = e.target.files;
     if (!files) return;
@@ -69,6 +97,7 @@ export default function Home() {
     setImagePreviews(previews);
   };
 
+  // ✅ Remove image preview
   const removePreview = (index: number) => {
     const newPreviews = [...imagePreviews];
     newPreviews.splice(index, 1);
@@ -83,42 +112,53 @@ export default function Home() {
     }
   };
 
-  // ✏️ Edit Handler - category bhi set karo
+  // ✏️ Edit Handler - parse categories safely
   const handleEdit = (product: any) => {
     setEditingId(product.id);
     setIsEditing(true);
+    
+    let parsedCategories: ProductCategory[] = [ProductCategory.MEN];
+    
+    if (Array.isArray(product.categories)) {
+      parsedCategories = product.categories.map((c: any) => c as ProductCategory);
+    } else if (typeof product.categories === "string") {
+      try {
+        const parsed = JSON.parse(product.categories);
+        parsedCategories = Array.isArray(parsed) 
+          ? parsed.map((c: any) => c as ProductCategory)
+          : [parsed as ProductCategory];
+      } catch {
+        parsedCategories = [product.categories as ProductCategory];
+      }
+    }
+
     setFormData({
       title: product.title,
       originalPrice: product.original_price?.toString() || "",
       discountPrice: product.discount_price?.toString() || "",
       description: product.description,
-      specifications: product.specifications
-        ? JSON.stringify(product.specifications, null, 2)
-        : "",
       quantity: product.quantity?.toString() || "0",
-      category: product.category || "MEN", // ✅ Category set karo
+      categories: parsedCategories,
     });
+    
     const imgs = getImagesArray(product.images);
     setImagePreviews(imgs.slice(0, 7));
     window.scrollTo({ top: 0, behavior: "smooth" });
   };
 
+  // ❌ Cancel edit - reset form
   const cancelEdit = () => {
     setEditingId(null);
     setIsEditing(false);
     setFormData({
-      title: "",
-      originalPrice: "",
-      discountPrice: "",
-      description: "",
-      specifications: "",
-      quantity: "",
-      category: "MEN",
+      title: "", originalPrice: "", discountPrice: "",
+      description: "", quantity: "", categories: [ProductCategory.MEN],
     });
     setImagePreviews([]);
     if (fileInputRef.current) fileInputRef.current.value = "";
   };
 
+  // ✅ Submit handler
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     const form = new FormData();
@@ -129,15 +169,15 @@ export default function Home() {
     form.append("discountPrice", formData.discountPrice);
     form.append("description", formData.description);
     form.append("quantity", formData.quantity);
-    form.append("category", formData.category); // ✅ Category append karo
-
-    if (formData.specifications.trim() !== "") {
-      form.append("specifications", formData.specifications);
-    }
+    form.append("categories", JSON.stringify(formData.categories));
 
     const files = fileInputRef.current?.files;
     if (!isEditing && (!files || files.length === 0)) {
       alert("At least one image is required!");
+      return;
+    }
+    if (formData.categories.length === 0) {
+      alert("At least one category is required!");
       return;
     }
     for (const file of files || []) {
@@ -151,13 +191,8 @@ export default function Home() {
       } else if (result?.success) {
         alert(isEditing ? "✅ Product updated!" : "✅ Product added!");
         setFormData({
-          title: "",
-          originalPrice: "",
-          discountPrice: "",
-          description: "",
-          specifications: "",
-          quantity: "",
-          category: "MEN",
+          title: "", originalPrice: "", discountPrice: "",
+          description: "", quantity: "", categories: [ProductCategory.MEN],
         });
         setImagePreviews([]);
         if (fileInputRef.current) fileInputRef.current.value = "";
@@ -168,6 +203,7 @@ export default function Home() {
     });
   };
 
+  // 🗑️ Delete handler
   const handleDelete = async (id: number) => {
     if (!confirm("Delete this product?")) return;
     const result = await deleteProduct(id);
@@ -185,6 +221,7 @@ export default function Home() {
         🛍️ Massive Choice CMS
       </h1>
 
+      {/* Form Section */}
       <div className="bg-white p-4 md:p-6 rounded-xl shadow-lg mb-8 max-w-2xl mx-auto border border-gray-200">
         <h2 className="text-xl font-semibold mb-4 text-gray-700">
           {isEditing ? "✏️ Edit Product" : "➕ Add New Product"}
@@ -205,43 +242,64 @@ export default function Home() {
           {/* Title */}
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1">Title *</label>
-            <input type="text" placeholder="Product title..." required className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+            <input type="text" placeholder="Product title..." required 
+              className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
               value={formData.title} onChange={(e) => setFormData({ ...formData, title: e.target.value })} />
           </div>
 
-          {/* Prices + Quantity + Category */}
-          <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+          {/* Prices + Quantity */}
+          <div className="grid grid-cols-2 md:grid-cols-3 gap-4">
             <div>
               <label className="block text-sm font-medium text-gray-600 mb-1">Original Price (PKR) *</label>
-              <input type="number" placeholder="9500" required min="0" step="0.01" className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+              <input type="number" placeholder="9500" required min="0" step="0.01" 
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
                 value={formData.originalPrice} onChange={(e) => setFormData({ ...formData, originalPrice: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-600 mb-1">Discount Price (PKR)</label>
-              <input type="number" placeholder="5700" min="0" step="0.01" className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+              <input type="number" placeholder="5700" min="0" step="0.01" 
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
                 value={formData.discountPrice} onChange={(e) => setFormData({ ...formData, discountPrice: e.target.value })} />
             </div>
             <div>
               <label className="block text-sm font-medium text-gray-600 mb-1">Quantity *</label>
-              <input type="number" placeholder="50" required min="0" className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
+              <input type="number" placeholder="50" required min="0" 
+                className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black"
                 value={formData.quantity} onChange={(e) => setFormData({ ...formData, quantity: e.target.value })} />
             </div>
-            {/* ✅ NEW: Category Dropdown */}
-            <div>
-              <label className="block text-sm font-medium text-gray-600 mb-1">Category *</label>
-              <select required className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-black bg-white"
-                value={formData.category} onChange={(e) => setFormData({ ...formData, category: e.target.value })}>
-                {CATEGORY_OPTIONS.map((cat) => (
-                  <option key={cat.value} value={cat.value}>{cat.label}</option>
-                ))}
-              </select>
+          </div>
+
+          {/* ✅ Multiple Category Checkboxes */}
+          <div>
+            <label className="block text-sm font-medium text-gray-600 mb-2">Categories * (Select one or more)</label>
+            <div className="grid grid-cols-2 md:grid-cols-4 gap-2">
+              {CATEGORY_OPTIONS.map((cat) => {
+                const isSelected = formData.categories.includes(cat.value as ProductCategory);
+                return (
+                  <label 
+                    key={cat.value}
+                    className={`flex items-center gap-2 p-2.5 border rounded-lg cursor-pointer transition ${
+                      isSelected ? 'border-blue-500 bg-blue-50 ring-1 ring-blue-500' : 'border-gray-300 hover:border-gray-400'
+                    }`}
+                  >
+                    <input type="checkbox" className="w-4 h-4 text-blue-600 rounded focus:ring-blue-500"
+                      checked={isSelected}
+                      onChange={() => toggleCategory(cat.value as ProductCategory)} />
+                    <span className="text-sm text-gray-700">{cat.label}</span>
+                  </label>
+                );
+              })}
             </div>
+            {formData.categories.length === 0 && (
+              <p className="text-red-500 text-xs mt-1">⚠️ At least one category required</p>
+            )}
           </div>
 
           {/* Description */}
           <div>
             <label className="block text-sm font-medium text-gray-600 mb-1">Description *</label>
-            <textarea placeholder="Product description..." required rows={3} className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-vertical text-black"
+            <textarea placeholder="Product description..." required rows={3} 
+              className="w-full p-2.5 border border-gray-300 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none resize-vertical text-black"
               value={formData.description} onChange={(e) => setFormData({ ...formData, description: e.target.value })} />
           </div>
 
@@ -267,18 +325,8 @@ export default function Home() {
             </div>
           )}
 
-          {/* Specifications */}
-          <div>
-            <label className="block text-sm font-medium text-gray-600 mb-1">
-              Specifications <span className="text-gray-400 font-normal">(Optional - JSON)</span>
-            </label>
-            <textarea placeholder={`{ "gender": "Men", "warranty": "1 Year" }`} rows={4}
-              className="w-full p-2.5 border border-gray-300 rounded-lg font-mono text-sm focus:ring-2 focus:ring-blue-500 outline-none resize-vertical text-black"
-              value={formData.specifications} onChange={(e) => setFormData({ ...formData, specifications: e.target.value })} />
-          </div>
-
-          {/* Submit */}
-          <button type="submit" disabled={isPending || (!isEditing && imagePreviews.length === 0)}
+          {/* Submit Button */}
+          <button type="submit" disabled={isPending || (!isEditing && imagePreviews.length === 0) || formData.categories.length === 0}
             className="w-full bg-blue-600 text-white font-semibold py-2.5 px-4 rounded-lg hover:bg-blue-700 transition disabled:bg-gray-400 disabled:cursor-not-allowed flex items-center justify-center gap-2">
             {isPending ? (
               <><span className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></span>{isEditing ? "Updating..." : "Uploading..."}</>
@@ -287,10 +335,13 @@ export default function Home() {
         </form>
       </div>
 
-      {/* Product List */}
+      {/* Product List Section */}
       <div className="max-w-6xl mx-auto">
-        <h2 className="text-xl font-semibold mb-4 text-gray-700">📦 Products ({products.length})</h2>
-        {products.length === 0 ? (
+        <h2 className="text-xl font-semibold mb-4 text-gray-700">
+          📦 Products ({Array.isArray(products) ? products.length : 0})
+        </h2>
+        
+        {!Array.isArray(products) || products.length === 0 ? (
           <div className="text-center py-12 bg-white rounded-xl border border-dashed border-gray-300">
             <p className="text-gray-500">No products yet. Add your first product! 🎉</p>
           </div>
@@ -300,18 +351,19 @@ export default function Home() {
               const images = getImagesArray(product.images);
               const firstImage = images[0] || "/placeholder.png";
               const imagesCount = images.length;
-              // ✅ Category badge color mapping
-              const categoryColors: Record<string, string> = {
-                MEN: 'bg-blue-100 text-blue-800',
-                WOMEN: 'bg-pink-100 text-pink-800',
-                KIDS: 'bg-yellow-100 text-yellow-800',
-                COUPLE: 'bg-purple-100 text-purple-800',
-                SMART_WATCHES: 'bg-green-100 text-green-800',
-                CLASSIC: 'bg-gray-100 text-gray-800',
-                SPORT: 'bg-orange-100 text-orange-800',
-                LUXURY: 'bg-amber-100 text-amber-800',
-              };
-              const categoryLabel = product.category?.replace(/_/g, ' ') || 'UNCATEGORIZED';
+              
+              // Parse categories safely
+              let productCategories: string[] = [];
+              if (Array.isArray(product.categories)) {
+                productCategories = product.categories;
+              } else if (typeof product.categories === "string") {
+                try {
+                  const parsed = JSON.parse(product.categories);
+                  productCategories = Array.isArray(parsed) ? parsed : [parsed];
+                } catch {
+                  productCategories = [product.categories];
+                }
+              }
 
               return (
                 <div key={product.id} className="bg-white rounded-xl shadow-md border border-gray-200 overflow-hidden hover:shadow-lg transition">
@@ -324,10 +376,14 @@ export default function Home() {
                     {imagesCount > 1 && (
                       <span className="absolute top-2 right-2 bg-black/70 text-white text-xs px-2 py-1 rounded-full">+{imagesCount - 1}</span>
                     )}
-                    {/* ✅ Category Badge */}
-                    <span className={`absolute bottom-2 left-2 text-xs px-2 py-1 rounded-full font-medium ${categoryColors[product.category] || 'bg-gray-100 text-gray-800'}`}>
-                      {categoryLabel}
-                    </span>
+                    {/* Multiple Category Badges */}
+                    <div className="absolute bottom-2 left-2 flex flex-wrap gap-1">
+                      {productCategories.map((cat) => (
+                        <span key={cat} className={`text-[10px] px-1.5 py-0.5 rounded-full font-medium ${getCategoryColor(cat)}`}>
+                          {getCategoryLabel(cat)}
+                        </span>
+                      ))}
+                    </div>
                   </div>
                   <div className="p-4">
                     <h3 className="font-semibold text-gray-800 line-clamp-2">{product.title}</h3>
